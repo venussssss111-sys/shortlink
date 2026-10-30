@@ -1,0 +1,106 @@
+# 一条命令起全套：MySQL + Redis + 后端 + 前端
+#
+#   docker compose up -d --build     启动（首次会构建镜像，5~8 分钟）
+#   docker compose logs -f backend   看后端日志
+#   docker compose down              停止（数据卷保留）
+#   docker compose down -v           连数据一起删
+#
+# 访问：http://localhost:8088    默认账号 admin / 123456
+#
+# 和开发模式的区别：这里后端不对外暴露端口，所有流量都经过 nginx
+# （贴近真实部署：只有一个入口，跨域、限流、静态资源都在 nginx 收口）。
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: shortlink-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: shortlink
+      TZ: Asia/Shanghai
+    ports:
+      # 只为本机调试保留；正式部署应该删掉这行，数据库不对外
+      - "3307:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_bin
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首次启动按文件名顺序执行整个 sql 目录：01-schema.sql → 02-user.sql
+      # （sql/migrations/ 是子目录，不会被自动执行）
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p123456"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: shortlink-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: shortlink-backend:latest
+    container_name: shortlink-app
+    restart: unless-stopped
+    environment:
+      # Spring Boot 的松散绑定：SPRING_DATASOURCE_URL ↔ spring.datasource.url
+      # 容器里数据库主机名就是服务名 mysql，不是 localhost
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/shortlink?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: "123456"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      # 生成出来的短链要指向 nginx 的端口，不是后端端口
+      SHORTLINK_DOMAIN: http://localhost:8088
+      # 浏览器经 nginx(8088) 访问时 POST 会带 Origin，必须在白名单里，否则 403
+      SHORTLINK_CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:8088
+      SHORTLINK_UPLOAD_DIR: /app/uploads
+      # 正式环境用 secrets / .env 注入，别写死
+      SHORTLINK_JWT_SECRET: change-me-before-production-9f3a7c1e5b2d4a68
+      TZ: Asia/Shanghai
+      # 容器里不要打 SQL 日志：会把 stdout 撑爆，也拖慢压测
+      SPRING_APPLICATION_JSON: '{"mybatis-plus":{"configuration":{"log-impl":"org.apache.ibatis.logging.nologging.NoLoggingImpl"}},"logging":{"level":{"com.dafeiyu.shortlink":"info","root":"warn"}}}'
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 不 publish 端口：外部只能通过 nginx 进来
+    expose:
+      - "8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: shortlink-web:latest
+    container_name: shortlink-web
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  mysql-data:
+  redis-data:
+  uploads:

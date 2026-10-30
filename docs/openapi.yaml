@@ -1,0 +1,467 @@
+openapi: 3.0.3
+
+info:
+  title: ShortLink API
+  version: 1.0.0
+  description: |
+    短链接服务接口契约。
+
+    **使用方式**：第 4 周做前端时，把整个文件丢给 AI（Cursor / Claude），
+    让它严格按这份契约生成请求和响应类型，不要自己猜字段名。
+    接口先定死，前后端才不会在联调时打架。
+
+servers:
+  - url: http://localhost:8080
+    description: 本地开发
+
+tags:
+  - name: 短链管理
+    description: 创建、查询、停用、删除
+  - name: 跳转
+    description: 短码重定向
+  - name: 统计
+    description: 访问数据分析（v3 实现）
+
+paths:
+  /api/links:
+    post:
+      tags: [短链管理]
+      summary: 创建短链
+      operationId: createLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLinkRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultLinkVO'
+        '400':
+          description: 参数不合法 / URL 被拒绝
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultVoid'
+        '409':
+          description: 自定义短码已被占用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultVoid'
+
+    get:
+      tags: [短链管理]
+      summary: 分页查询短链
+      operationId: pageLink
+      parameters:
+        - name: page
+          in: query
+          description: 页码，从 1 开始
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: keyword
+          in: query
+          description: 按短码或原始链接模糊搜索
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultPageLink'
+
+  /api/links/{code}:
+    get:
+      tags: [短链管理]
+      summary: 查询单个短链详情
+      operationId: getLink
+      parameters:
+        - $ref: '#/components/parameters/CodePath'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultLinkDetail'
+        '404':
+          description: 短链不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultVoid'
+    delete:
+      tags: [短链管理]
+      summary: 删除短链
+      operationId: deleteLink
+      parameters:
+        - $ref: '#/components/parameters/CodePath'
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultVoid'
+        '404':
+          description: 短链不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultVoid'
+
+  /api/links/{code}/status:
+    patch:
+      tags: [短链管理]
+      summary: 启用或停用短链
+      operationId: updateLinkStatus
+      parameters:
+        - $ref: '#/components/parameters/CodePath'
+        - name: status
+          in: query
+          required: true
+          description: 1 启用，0 停用
+          schema:
+            type: integer
+            enum: [0, 1]
+      responses:
+        '200':
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultVoid'
+        '404':
+          description: 短链不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultVoid'
+
+  /{code}:
+    get:
+      tags: [跳转]
+      summary: 短码跳转（302）
+      description: |
+        浏览器直接访问，返回 302 + Location 头，**不返回 JSON**。
+        响应头固定带 `Cache-Control: no-store`，否则统计会丢。
+      operationId: redirect
+      parameters:
+        - $ref: '#/components/parameters/CodePath'
+      responses:
+        '302':
+          description: 重定向到原始链接
+          headers:
+            Location:
+              description: 原始长链接
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+        '404':
+          description: 短码不存在或被停用
+        '410':
+          description: 短链已过期
+
+  /api/stats/overview:
+    get:
+      tags: [统计]
+      summary: 总览（v3 实现）
+      description: 今日总 PV/UV、短链总数、Top 10 短链
+      operationId: statsOverview
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultStatsOverview'
+
+  /api/stats/{code}/trend:
+    get:
+      tags: [统计]
+      summary: 单条短链的 PV/UV 趋势（v3 实现）
+      operationId: statsTrend
+      parameters:
+        - $ref: '#/components/parameters/CodePath'
+        - name: start
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultTrend'
+
+  /api/stats/{code}/sources:
+    get:
+      tags: [统计]
+      summary: 单条短链的来源分布（v3 实现）
+      operationId: statsSources
+      parameters:
+        - $ref: '#/components/parameters/CodePath'
+      responses:
+        '200':
+          description: 查询成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResultSourceList'
+
+components:
+  parameters:
+    CodePath:
+      name: code
+      in: path
+      required: true
+      description: 短码，4-10 位字母或数字
+      schema:
+        type: string
+        pattern: '^[a-zA-Z0-9]{4,10}$'
+        example: aB3xK9
+
+  schemas:
+    CreateLinkRequest:
+      type: object
+      required: [originUrl]
+      properties:
+        originUrl:
+          type: string
+          maxLength: 2048
+          description: 原始长链接，只允许 http/https
+          example: https://www.baidu.com/s?wd=shortlink
+        customCode:
+          type: string
+          pattern: '^[a-zA-Z0-9]{4,10}$'
+          description: 自定义短码，不传则随机生成 6 位
+          example: spring2027
+        expireDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          description: 有效天数，不传表示永久
+          example: 30
+
+    LinkVO:
+      type: object
+      description: 创建短链的返回
+      properties:
+        code:
+          type: string
+          example: aB3xK9
+        shortUrl:
+          type: string
+          example: http://localhost:8080/aB3xK9
+        originUrl:
+          type: string
+          example: https://www.baidu.com/s?wd=shortlink
+        expireTime:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-11-20 10:00:00'
+
+    LinkDetail:
+      type: object
+      description: 短链完整信息
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        code:
+          type: string
+          example: aB3xK9
+        originUrl:
+          type: string
+        expireTime:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: integer
+          description: 1 正常，0 停用
+          example: 1
+        createTime:
+          type: string
+          format: date-time
+        updateTime:
+          type: string
+          format: date-time
+
+    PageLink:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkDetail'
+        total:
+          type: integer
+          format: int64
+          example: 128
+        size:
+          type: integer
+          example: 10
+        current:
+          type: integer
+          example: 1
+        pages:
+          type: integer
+          example: 13
+
+    ApiResultVoid:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          nullable: true
+
+    ApiResultLinkVO:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          $ref: '#/components/schemas/LinkVO'
+
+    ApiResultLinkDetail:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          $ref: '#/components/schemas/LinkDetail'
+
+    ApiResultPageLink:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          $ref: '#/components/schemas/PageLink'
+
+    TrendPoint:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          example: '2026-12-01'
+        pv:
+          type: integer
+          format: int64
+          example: 1280
+        uv:
+          type: integer
+          format: int64
+          example: 320
+
+    ApiResultTrend:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrendPoint'
+
+    SourceItem:
+      type: object
+      properties:
+        source:
+          type: string
+          example: weixin
+        count:
+          type: integer
+          format: int64
+          example: 512
+
+    ApiResultSourceList:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceItem'
+
+    ApiResultStatsOverview:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          type: object
+          properties:
+            todayPv:
+              type: integer
+              format: int64
+            todayUv:
+              type: integer
+              format: int64
+            totalLinks:
+              type: integer
+              format: int64
+            topLinks:
+              type: array
+              items:
+                $ref: '#/components/schemas/LinkDetail'

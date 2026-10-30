@@ -1,0 +1,49 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### VS Code ###
+.vscode/
+
+### Frontend ###
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+### 系统文件 ###
+.DS_Store
+Thumbs.db
+
+### 日志 ###
+*.log
+logs/
+
+### 本地配置（含密码，别提交）###
+src/main/resources/application-local.yml
+
+### 项目内置的 MySQL 数据目录（体积大，别提交）###
+.mysql-data/
+
+### 压测产物（单个 jtl 就 40MB+，只提交 jmx 和脚本）###
+loadtest/*.jtl
+loadtest/report/
+loadtest/*.html
+
+# 用户上传的头像等文件，不入库
+uploads/
+
+### JMeter 生成的 HTML 报告目录（每次跑一份，几百个文件，别提交）
+loadtest/report*/
+### JMeter 运行日志
+loadtest/*.log
+### 临时文件
+.tmp/
+*.tmp

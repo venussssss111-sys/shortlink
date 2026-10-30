@@ -1,0 +1,71 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: shortlink
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 3307 = docker-compose 里的 MySQL（本机 3306 已被别的 MySQL 服务占用）
+    # 如果你想用本机 3306 那个 MySQL：把端口改成 3306，password 填你自己的 root 密码
+    url: jdbc:mysql://localhost:3307/shortlink?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+    username: root
+    password: "123456"
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      timeout: 2000ms
+
+  jackson:
+    time-zone: Asia/Shanghai
+
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 4MB
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 打印 SQL，调 v1 的时候非常有用（看每次请求有没有真的打库）
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+shortlink:
+  # 生成短链时拼接的域名，上线换成你的域名
+  domain: http://localhost:8080
+  # 随机短码长度
+  code-length: 6
+  cors:
+    # 允许跨域访问的来源，逗号分隔。
+    # 注意：浏览器发 POST 时即使同源也会带 Origin，所以部署用的地址也必须在这里，
+    # 否则表现是「curl 能登录、浏览器 403 Invalid CORS request」
+    allowed-origins: http://localhost:5173,http://localhost:8088
+  jwt:
+    # 生产环境必须用环境变量注入，不要提交进 git
+    secret: "shortlink-dev-secret-change-me-in-prod-9f3a7c1e5b2d4a68"
+    # token 有效期（分钟），1440 = 24 小时
+    expire-minutes: 1440
+  upload:
+    # 头像落盘目录（相对项目根目录），访问地址是 /uploads/**
+    dir: ./uploads
+  # 令牌桶限流。capacity = 桶容量（允许的突发量），rate = 每秒补充令牌数，
+  # ttl-seconds = 桶闲置多久自动删除。经验：ttl ≥ capacity / rate，否则桶没补满就被删了。
+  # 这些数是拍的，生产应该按压测结果调
+  rate-limit:
+    enabled: true
+    read:  { capacity: 60, rate: 5.0,  ttl-seconds: 60 }
+    write: { capacity: 20, rate: 1.0,  ttl-seconds: 60 }
+    auth:  { capacity: 5,  rate: 0.2,  ttl-seconds: 120 }
+    # 建链是唯一会写库的接口，单独收紧：桶更小、补充更慢（防刷短码）
+    create: { capacity: 10, rate: 0.5,  ttl-seconds: 120 }
+
+logging:
+  level:
+    com.dafeiyu.shortlink: debug

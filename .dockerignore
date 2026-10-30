@@ -1,0 +1,23 @@
+# 构建上下文里不要的东西：传得越少，构建越快
+target/
+.git/
+.gitignore
+.idea/
+*.iml
+.vscode/
+
+# 前端有自己的 Dockerfile，不要塞进后端镜像的上下文
+frontend/
+
+# 本地数据和上传文件不进镜像（运行时挂卷）
+uploads/
+.mysql-data/
+mysql-data/
+.run.log
+*.log
+
+# 文档和压测产物不进镜像
+docs/
+loadtest/
+*.md
+!README.md

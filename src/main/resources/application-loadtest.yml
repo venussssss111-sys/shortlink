@@ -1,0 +1,19 @@
+# 压测专用 profile
+# 为什么需要它：application.yml 里开了 StdOutImpl 打印每条 SQL，以及 com.dafeiyu 的 debug 日志。
+# 压测时每秒几千个请求，控制台疯狂输出会把 CPU 和 IO 吃掉，
+# 测出来的是「打印速度」而不是「接口速度」。
+#
+# 注意：root 保持 info，这样 Spring 的启动日志还在，你能确认它真的起来了。
+# 只把「每条 SQL 都打印」和「业务 debug 日志」关掉，那才是压测时的主要开销。
+#
+# 启动方式：mvn spring-boot:run -Dspring-boot.run.profiles=loadtest
+# IDEA：VM options 里加 -Dspring.profiles.active=loadtest
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+logging:
+  level:
+    root: info
+    com.dafeiyu.shortlink: warn
