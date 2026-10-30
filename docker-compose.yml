@@ -7,6 +7,9 @@
 #
 # 访问：http://localhost:8088    默认账号 admin / 123456
 #
+# 密码、密钥都在下面用 ${VAR:-默认值} 取，来源是项目根目录的 .env（不进 git）。
+# 想改密码：cp .env.example .env，改完重启即可。什么都不做也能跑，用的是演示默认值。
+#
 # 和开发模式的区别：这里后端不对外暴露端口，所有流量都经过 nginx
 # （贴近真实部署：只有一个入口，跨域、限流、静态资源都在 nginx 收口）。
 
@@ -16,7 +19,7 @@ services:
     container_name: shortlink-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_ROOT_PASSWORD: '${DB_PASSWORD:-123456}'
       MYSQL_DATABASE: shortlink
       TZ: Asia/Shanghai
     ports:
@@ -31,7 +34,8 @@ services:
       # （sql/migrations/ 是子目录，不会被自动执行）
       - ./sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p123456"]
+      # 不带密码：mysql 拒绝认证时 mysqladmin 也会返回 0，够判断「服务起来了没有」
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost --silent"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -59,20 +63,19 @@ services:
     container_name: shortlink-app
     restart: unless-stopped
     environment:
-      # Spring Boot 的松散绑定：SPRING_DATASOURCE_URL ↔ spring.datasource.url
-      # 容器里数据库主机名就是服务名 mysql，不是 localhost
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/shortlink?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: "123456"
-      SPRING_DATA_REDIS_HOST: redis
-      SPRING_DATA_REDIS_PORT: 6379
+      # 变量名与 application.yml 里的占位符一一对应，改一处就够
+      DB_URL: jdbc:mysql://mysql:3306/shortlink?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+      DB_USERNAME: root
+      DB_PASSWORD: '${DB_PASSWORD:-123456}'
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
       # 生成出来的短链要指向 nginx 的端口，不是后端端口
-      SHORTLINK_DOMAIN: http://localhost:8088
+      SHORTLINK_DOMAIN: '${SHORTLINK_DOMAIN:-http://localhost:8088}'
       # 浏览器经 nginx(8088) 访问时 POST 会带 Origin，必须在白名单里，否则 403
-      SHORTLINK_CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:8088
-      SHORTLINK_UPLOAD_DIR: /app/uploads
-      # 正式环境用 secrets / .env 注入，别写死
-      SHORTLINK_JWT_SECRET: change-me-before-production-9f3a7c1e5b2d4a68
+      CORS_ALLOWED_ORIGINS: '${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:8088}'
+      UPLOAD_DIR: /app/uploads
+      JWT_SECRET: '${JWT_SECRET:-change-me-before-production-9f3a7c1e5b2d4a68}'
+      JWT_EXPIRE_MINUTES: '${JWT_EXPIRE_MINUTES:-1440}'
       TZ: Asia/Shanghai
       # 容器里不要打 SQL 日志：会把 stdout 撑爆，也拖慢压测
       SPRING_APPLICATION_JSON: '{"mybatis-plus":{"configuration":{"log-impl":"org.apache.ibatis.logging.nologging.NoLoggingImpl"}},"logging":{"level":{"com.dafeiyu.shortlink":"info","root":"warn"}}}'

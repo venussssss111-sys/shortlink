@@ -133,6 +133,33 @@ cd frontend && npm install && npm run dev   # 前端 5173
 
 阈值都在 [application.yml](src/main/resources/application.yml) 的 `shortlink.rate-limit` 下。
 
+## 配置（环境变量）
+
+所有密码和密钥都从环境变量读，仓库里只保留「本地演示」用的默认值。
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `DB_URL` | `jdbc:mysql://localhost:3307/shortlink?...` | 本机开发指向容器里的 3307；compose 里改成 `mysql:3306` |
+| `DB_USERNAME` / `DB_PASSWORD` | `root` / `123456` | 数据库账号密码 |
+| `REDIS_HOST` / `REDIS_PORT` | `localhost` / `6379` | |
+| `JWT_SECRET` | 演示串 | **上线必须换**：知道默认值就能伪造任意用户的 token |
+| `JWT_EXPIRE_MINUTES` | `1440` | token 有效期（分钟） |
+| `SHORTLINK_DOMAIN` | `http://localhost:8080` | 生成短链时拼在前面的域名 |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:8088` | 逗号分隔；部署地址必须在内，否则浏览器登录会 403 |
+| `UPLOAD_DIR` | `./uploads` | 头像落盘目录 |
+
+Docker 部署时从项目根目录的 `.env` 读（模板见 [`.env.example`](.env.example)）：
+
+```bash
+cp .env.example .env     # 改 DB_PASSWORD 和 JWT_SECRET
+docker compose up -d
+```
+
+`.env` 在 `.gitignore` 里，不会进仓库。什么都不配也能跑，用的是演示默认值。
+
+改 `JWT_SECRET` 后所有人要重新登录（旧 token 验签失败）——这一点是实测过的：
+容器换成新密钥后旧 token 立刻 401，换回来又恢复 200。
+
 ## 部署说明
 
 四个容器都带 `healthcheck`，`docker compose ps` 应全部为 `healthy`。
