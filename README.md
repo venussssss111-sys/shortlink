@@ -1,6 +1,12 @@
 # ShortLink · 短链接服务
 
-一个从零实现的全栈短链接服务：长链接转短链、302 跳转、访问统计、管理后台。
+Java 全栈短链接服务：长链转短链、302 跳转、访问统计、鉴权限流、管理后台。
+
+**一条命令跑起来**：`docker compose up -d --build` → <http://localhost:8088>
+
+- 500 并发压测 **15,688 QPS**，P99 62 ms（数据见 [docs/压测报告.md](docs/压测报告.md)）
+- 防穿透三件套：热点读缓存 + 本地布隆过滤器 + 空值缓存（随机 TTL）
+- 安全：手写 JWT、Redis 令牌桶限流（Lua 原子）、多租户越权隔离
 
 | 层 | 技术 |
 |---|---|
@@ -22,9 +28,8 @@ shortlink/
 │   └── openapi.yaml         # 前后端接口契约（给 AI 生成前端用）
 ├── sql/
 │   ├── 01-schema.sql        # 建库建表（short_link / access_log / link_stats）
-│   ├── 02-user.sql          # 用户表 + 默认账号 admin / 123456
-│   ├── migrations/          # 老库增量迁移（新装不用管）
-│   └── 02-user.sql          # 用户表 + 默认管理员
+│   ├── 02-user.sql          # 用户表 + 默认管理员
+│   └── migrations/          # 老库增量迁移（新装不用管）
 ├── src/main/java/com/dafeiyu/shortlink/
 │   ├── ShortLinkApplication.java
 │   ├── common/              # 统一返回、异常、全局处理、UserContext
@@ -50,77 +55,56 @@ shortlink/
 
 ## 快速开始
 
-### 0. 先搞清楚数据库跑在哪
-
-你本机 3306 端口已经有一个 MySQL 服务在跑，**项目默认连的是 3307**，两者不冲突。
-
-**方案 A：用 Docker（推荐，一次装好，六周都用它）**
+### 0. 启动（Docker，推荐）
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-MySQL 会在 `localhost:3307`，Redis 在 `localhost:6379`，建表脚本会自动执行。
-装 Docker 的步骤见 [docs/装Docker.md](docs/装Docker.md)。
+四个容器（mysql / redis / backend / frontend）都健康后，打开 <http://localhost:8088>。
 
-**方案 B：用你本机已有的 MySQL（3306）**
+建库、建表、默认账号全部由 compose 自动完成，**不需要手动执行任何 SQL**。
+首次构建要拉镜像 + 下载 Maven 依赖，10~45 分钟取决于网络；之后改代码重建 1~2 分钟。
 
-改 [application.yml](src/main/resources/application.yml) 两行：url 里的 `3307` 改成 `3306`，`password` 改成你的 root 密码。然后手动建表：
+### 1. 试一下
 
 ```bash
-mysql -uroot -p < sql/01-schema.sql
+TOKEN=$(curl -s -X POST http://localhost:8088/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"123456"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+
+curl -X POST http://localhost:8088/api/links \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"originUrl":"https://www.baidu.com/s?wd=shortlink"}'
 ```
 
-### 1. 启动
+返回里的 `shortUrl` 就是新短链，浏览器打开会 302 跳回原地址。
+
+### 2. 本地开发（不用 Docker）
+
+只起依赖，后端和前端在本地跑：
 
 ```bash
-mvn spring-boot:run
+docker compose up -d mysql redis            # MySQL 3307 / Redis 6379
+mvn spring-boot:run                         # 后端 8080
+cd frontend && npm install && npm run dev   # 前端 5173
 ```
 
-### 2. 试一下
-
-```bash
-curl -X POST http://localhost:8080/api/links -H "Content-Type: application/json" -d '{"originUrl":"https://www.baidu.com/s?wd=shortlink"}'
-```
-
-（Windows cmd 里把行尾的 `'` 换成 `"`，或者直接用 Postman / IDEA 的 HTTP Client。）
-
-返回：
-
-```json
-{"code":200,"message":"success","data":{"code":"aB3xK9","shortUrl":"http://localhost:8080/aB3xK9","originUrl":"https://www.baidu.com/s?wd=shortlink","expireTime":null}}
-```
-
-浏览器打开 `http://localhost:8080/aB3xK9`，应该 302 跳回百度。
-
-### 3. 前端管理台
-
-```bash
-cd frontend
-npm install     # 只需第一次
-npm run dev
-```
-
-打开 <http://localhost:5173> 就是管理台：列表、搜索、分页、新建、启用/停用、删除，全部走真实接口。
-
-- 前端把 `/api` 通过 Vite 的 proxy 转给 `localhost:8080`，**不用管跨域**，但**后端必须同时开着**。
-- 改一行代码，页面自动刷新，比在 Apifox 里手填 JSON 快得多。Apifox 留着干两件事：调还没做界面的接口、造特殊数据（比如故意传 3 位短码看 400）。
-- 如果 `npm run dev` 或 `npm run build` 报 `Access is denied`（esbuild 删临时文件失败），把临时目录指到工作区：
+- 前端把 `/api` 通过 Vite proxy 转给 `localhost:8080`，**不用处理跨域**，但后端必须同时开着。
+- 如果 3306 端口已被别的 MySQL 占用：把 [application.yml](src/main/resources/application.yml) 里的 `3307` 和密码改成自己的即可。
+- `npm run dev` / `npm run build` 报 `Access is denied`（esbuild 删临时文件失败）时，把临时目录指到工作区：
 
   ```bash
   mkdir -p D:\dafeiyuwork\.tmp
   export TEMP='D:\dafeiyuwork\.tmp'
   ```
 
-### 4. 登录
+### 3. 登录
 
-管理台现在要登录才能用（默认账号 **admin / 123456**，仅本机演示用）。第一次启动前先建表：
+管理台需要登录才能用（默认账号 **admin / 123456**，**仅本机演示用**）。
 
-```bash
-docker exec -i shortlink-mysql mysql -uroot -p123456 shortlink < sql/02-user.sql
-```
-
-> ⚠️ **只要打算放到公网，先去右上角头像 → 修改密码，把 `123456` 换掉。** 默认密码写在仓库里，不改等于把管理员权限公开。
+> ⚠️ 只要打算放到公网，先去右上角头像 → 修改密码，把 `123456` 换掉。默认密码写在仓库里，不改等于把管理员权限公开。
 
 鉴权链路（面试可以直接照着讲）：
 
@@ -136,7 +120,7 @@ docker exec -i shortlink-mysql mysql -uroot -p123456 shortlink < sql/02-user.sql
 
 接口：`POST /api/auth/register`、`/login`、`/logout`、`/password`、`/avatar`，`GET /api/auth/me`。
 
-### 5. 限流与安全
+### 4. 限流与安全
 
 | 风险 | 实现 | 关键点 |
 |---|---|---|
@@ -149,15 +133,11 @@ docker exec -i shortlink-mysql mysql -uroot -p123456 shortlink < sql/02-user.sql
 
 阈值都在 [application.yml](src/main/resources/application.yml) 的 `shortlink.rate-limit` 下。
 
-## 一条命令起全套
+## 部署说明
 
-```bash
-docker compose up -d --build
-```
+四个容器都带 `healthcheck`，`docker compose ps` 应全部为 `healthy`。
 
-启动完访问 <http://localhost:8088>，四个容器（mysql / redis / backend / frontend）全部 `healthy`。
-首次构建要拉镜像 + 下 Maven 依赖，**10~45 分钟取决于网络**（依赖下载是大头）；之后改代码重建只要 1~2 分钟。
-架构、nginx 为什么要把短码路由单独拎出来、镜像怎么从 700MB 瘦到 429MB、构建卡住怎么排查，见 [docs/部署.md](docs/部署.md)。
+架构图、nginx 为什么要把短码路由单独拎出来、镜像怎么从 700MB 瘦到 429MB、构建卡住怎么排查，见 [docs/部署.md](docs/部署.md)。
 
 ## 界面
 
@@ -179,7 +159,7 @@ docker compose up -d --build
 
 - [x] v1 后端骨架：生成 / 跳转 / 列表 / 停用 / 删除
 - [x] v2-1 Redis 缓存（QPS 7,088 → 17,701，p99 37 → 10 ms）
-- [x] v2-2 空值缓存 + 随机 TTL + 本地布隆过滤器（穿透 QPS 6,713 → 18,781）
+- [x] v2-2 防穿透：本地布隆过滤器 + 空值缓存（随机 TTL），随机不存在短码 6,713 → 16,693 QPS
 - [x] v3 访问统计：有界队列采集 → `access_log` → Redis PV/UV → 每日聚合进 `link_stats` → 查询接口
 - [x] v4 前端：短链管理 + 访问统计看板（趋势折线 / Top 榜 / 单码查询）
 - [x] v4-2 来源饼图（referer 拆域名）、设备柱状图（UA 归类）、登录页
